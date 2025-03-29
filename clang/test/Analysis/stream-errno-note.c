@@ -1,6 +1,7 @@
 // RUN: %clang_analyze_cc1 -analyzer-checker=core \
-// RUN:   -analyzer-checker=alpha.unix.Stream \
-// RUN:   -analyzer-checker=alpha.unix.Errno \
+// RUN:   -analyzer-checker=unix.Stream \
+// RUN:   -analyzer-config unix.Stream:Pedantic=true \
+// RUN:   -analyzer-checker=unix.Errno \
 // RUN:   -analyzer-checker=unix.StdCLibraryFunctions \
 // RUN:   -analyzer-config unix.StdCLibraryFunctions:ModelPOSIX=true \
 // RUN:   -analyzer-output text -verify %s
@@ -15,7 +16,7 @@ void check_fopen(void) {
   // expected-note@+1{{Taking false branch}}
   if (!F)
     return;
-  if (errno) {} // expected-warning{{An undefined value may be read from 'errno' [alpha.unix.Errno]}}
+  if (errno) {} // expected-warning{{An undefined value may be read from 'errno' [unix.Errno]}}
   // expected-note@-1{{An undefined value may be read from 'errno'}}
   fclose(F);
 }
@@ -27,7 +28,7 @@ void check_tmpfile(void) {
   // expected-note@+1{{Taking false branch}}
   if (!F)
     return;
-  if (errno) {} // expected-warning{{An undefined value may be read from 'errno' [alpha.unix.Errno]}}
+  if (errno) {} // expected-warning{{An undefined value may be read from 'errno' [unix.Errno]}}
   // expected-note@-1{{An undefined value may be read from 'errno'}}
   fclose(F);
 }
@@ -136,21 +137,13 @@ void check_rewind_errnocheck(void) {
     return;
   errno = 0;
   rewind(F); // expected-note{{After calling 'rewind' reading 'errno' is required to find out if the call has failed}}
-  fclose(F); // expected-warning{{Value of 'errno' was not checked and may be overwritten by function 'fclose' [alpha.unix.Errno]}}
+  fclose(F); // expected-warning{{Value of 'errno' was not checked and may be overwritten by function 'fclose' [unix.Errno]}}
   // expected-note@-1{{Value of 'errno' was not checked and may be overwritten by function 'fclose'}}
 }
 
 void check_fileno(void) {
-  FILE *F = tmpfile();
-  // expected-note@+2{{'F' is non-null}}
-  // expected-note@+1{{Taking false branch}}
-  if (!F)
-    return;
-  fileno(F);
-  // expected-note@-1{{Assuming that 'fileno' is successful; 'errno' becomes undefined after the call}}
-  if (errno) {} // expected-warning{{An undefined value may be read from 'errno'}}
-  // expected-note@-1{{An undefined value may be read from 'errno'}}
-  (void)fclose(F);
+  // nothing to check: checker assumes that 'fileno' is always successful
+  // (and does not change 'errno')
 }
 
 void check_fwrite_zeroarg(size_t Siz) {

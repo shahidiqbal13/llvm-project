@@ -49,11 +49,8 @@ static bool getPIE(const ArgList &Args, const ToolChain &TC) {
       Args.hasArg(options::OPT_r))
     return false;
 
-  Arg *A = Args.getLastArg(options::OPT_pie, options::OPT_no_pie,
-                           options::OPT_nopie);
-  if (!A)
-    return TC.isPIEDefault(Args);
-  return A->getOption().matches(options::OPT_pie);
+  return Args.hasFlag(options::OPT_pie, options::OPT_no_pie,
+                      TC.isPIEDefault(Args));
 }
 
 // FIXME: Need to handle CLANG_DEFAULT_LINKER here?
@@ -204,8 +201,7 @@ void solaris::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   ToolChain.AddFilePathLibArgs(Args, CmdArgs);
 
-  Args.addAllArgs(CmdArgs,
-                  {options::OPT_L, options::OPT_T_Group, options::OPT_r});
+  Args.addAllArgs(CmdArgs, {options::OPT_L, options::OPT_T_Group});
 
   bool NeedsSanitizerDeps = addSanitizerRuntimes(ToolChain, Args, CmdArgs);
   AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
@@ -215,7 +211,7 @@ void solaris::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     // Use the static OpenMP runtime with -static-openmp
     bool StaticOpenMP = Args.hasArg(options::OPT_static_openmp) &&
                         !Args.hasArg(options::OPT_static);
-    addOpenMPRuntime(CmdArgs, ToolChain, Args, StaticOpenMP);
+    addOpenMPRuntime(C, CmdArgs, ToolChain, Args, StaticOpenMP);
 
     if (D.CCCIsCXX()) {
       if (ToolChain.ShouldLinkCXXStdlib(Args))
@@ -227,7 +223,8 @@ void solaris::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     // Additional linker set-up and flags for Fortran. This is required in order
     // to generate executables. As Fortran runtime depends on the C runtime,
     // these dependencies need to be listed before the C runtime below.
-    if (D.IsFlangMode()) {
+    if (D.IsFlangMode() &&
+        !Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
       addFortranRuntimeLibraryPath(getToolChain(), Args, CmdArgs);
       addFortranRuntimeLibs(getToolChain(), Args, CmdArgs);
       CmdArgs.push_back("-lm");
@@ -269,8 +266,7 @@ void solaris::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       }
     }
     // Avoid AsanInitInternal cycle, Issue #64126.
-    if (ToolChain.getTriple().isX86() && SA.needsSharedRt() &&
-        SA.needsAsanRt()) {
+    if (SA.needsSharedRt() && SA.needsAsanRt()) {
       CmdArgs.push_back("-z");
       CmdArgs.push_back("now");
     }
@@ -298,13 +294,12 @@ static StringRef getSolarisLibSuffix(const llvm::Triple &Triple) {
   switch (Triple.getArch()) {
   case llvm::Triple::x86:
   case llvm::Triple::sparc:
+  default:
     break;
   case llvm::Triple::x86_64:
     return "/amd64";
   case llvm::Triple::sparcv9:
     return "/sparcv9";
-  default:
-    llvm_unreachable("Unsupported architecture");
   }
   return "";
 }
@@ -331,21 +326,23 @@ Solaris::Solaris(const Driver &D, const llvm::Triple &Triple,
 
   // If we are currently running Clang inside of the requested system root,
   // add its parent library path to those searched.
-  if (StringRef(D.Dir).startswith(D.SysRoot))
+  if (StringRef(D.Dir).starts_with(D.SysRoot))
     addPathIfExists(D, D.Dir + "/../lib", Paths);
 
   addPathIfExists(D, D.SysRoot + "/usr/lib" + LibSuffix, Paths);
 }
 
 SanitizerMask Solaris::getSupportedSanitizers() const {
+  const bool IsSparc = getTriple().getArch() == llvm::Triple::sparc;
   const bool IsX86 = getTriple().getArch() == llvm::Triple::x86;
   SanitizerMask Res = ToolChain::getSupportedSanitizers();
-  // FIXME: Omit X86_64 until 64-bit support is figured out.
-  if (IsX86) {
+  // FIXME: Omit SparcV9 and X86_64 until 64-bit support is figured out.
+  if (IsSparc || IsX86) {
     Res |= SanitizerKind::Address;
     Res |= SanitizerKind::PointerCompare;
     Res |= SanitizerKind::PointerSubtract;
   }
+  Res |= SanitizerKind::SafeStack;
   Res |= SanitizerKind::Vptr;
   return Res;
 }
